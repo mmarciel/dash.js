@@ -92,7 +92,8 @@ function StreamController() {
         videoTrackDetected,
         audioTrackDetected,
         isStreamBufferingCompleted,
-        playbackEndedTimerId;
+        playbackEndedTimerId,
+        buffers;
 
     function setup() {
         timeSyncController = TimeSyncController(context).getInstance();
@@ -327,19 +328,62 @@ function StreamController() {
             fromStreamInfo: oldStream ? oldStream.getStreamInfo() : null,
             toStreamInfo: newStream.getStreamInfo()
         });
+        let reloadPlayer = true;
 
         if (oldStream) {
+            const oldStreamInfo = {
+                audio: adapter.getMediaInfoForType(oldStream.getStreamInfo(), Constants.AUDIO),
+                video: adapter.getMediaInfoForType(oldStream.getStreamInfo(), Constants.VIDEO)
+            };
+            const newStreamInfo = {
+                audio: adapter.getMediaInfoForType(newStream.getStreamInfo(), Constants.AUDIO),
+                video: adapter.getMediaInfoForType(newStream.getStreamInfo(), Constants.VIDEO)
+            };
+            reloadPlayer = !isSameCodec(newStreamInfo, oldStreamInfo);
             oldStream.stopEventController();
-            oldStream.deactivate();
+            oldStream.deactivate(reloadPlayer);
+        }
+        if (reloadPlayer) {
+            buffers = null;
         }
         activeStream = newStream;
         playbackController.initialize(activeStream.getStreamInfo());
 
         //TODO detect if we should close and repose or jump to activateStream.
-        openMediaSource(seekTime, oldStream);
+        openMediaSource(seekTime, oldStream, reloadPlayer);
     }
 
-    function openMediaSource(seekTime, oldStream) {
+    // video/mp4;codecs="avc3.4d401f"
+
+    function isSameCodec(newStreamInfo, oldStreamInfo) {
+        if (!newStreamInfo || !oldStreamInfo) {
+            return false;
+        }
+        if (!oldStreamInfo.audio && newStreamInfo.audio || !oldStreamInfo.video && newStreamInfo.video) {
+            log('oldStreamInfo doesn\'t have audio or video but newStreamInfo has, reload');
+            return false;
+        }
+        if (newStreamInfo.audio && oldStreamInfo.audio &&
+            (newStreamInfo.audio.codec !== oldStreamInfo.audio.codec && getCodec(newStreamInfo.audio.codec) !== getCodec(oldStreamInfo.audio.codec))) {
+            log('Both streams have audio but codecs are not the same');
+            return false;
+        }
+        if (newStreamInfo.video && oldStreamInfo.video && (newStreamInfo.video.codec !== oldStreamInfo.video.codec) &&
+            getCodec(newStreamInfo.video.codec) !== getCodec(oldStreamInfo.video.codec)) {
+            log('Both streams have video but codecs are not the same');
+            return false;
+        }
+        log('Both streams have the same codecs');
+        return true;
+    }
+
+    function getCodec(codecString) {
+        const posInit = codecString.indexOf('"');
+        const posEnd = codecString.indexOf('.');
+        return codecString.substring(posInit, posEnd);
+    }
+
+    function openMediaSource(seekTime, oldStream, reloadPlayer) {
 
         let sourceUrl;
 
@@ -358,19 +402,30 @@ function StreamController() {
 
         if (!mediaSource) {
             mediaSource = mediaSourceController.createMediaSource();
-        } else {
+            mediaSource.addEventListener('sourceopen', onMediaSourceOpen, false);
+            mediaSource.addEventListener('webkitsourceopen', onMediaSourceOpen, false);
+            sourceUrl = mediaSourceController.attachMediaSource(mediaSource, videoModel);
+            log('MediaSource attached to element.  Waiting on open...');
+        } else if (reloadPlayer) {
+            log('Reloading stream');
             mediaSourceController.detachMediaSource(videoModel);
-        }
+            mediaSource.addEventListener('sourceopen', onMediaSourceOpen, false);
+            mediaSource.addEventListener('webkitsourceopen', onMediaSourceOpen, false);
+            sourceUrl = mediaSourceController.attachMediaSource(mediaSource, videoModel);
+            log('MediaSource attached to element.  Waiting on open...');
+        } else {
+            setMediaDuration();
+            activateStream(seekTime);
 
-        mediaSource.addEventListener('sourceopen', onMediaSourceOpen, false);
-        mediaSource.addEventListener('webkitsourceopen', onMediaSourceOpen, false);
-        sourceUrl = mediaSourceController.attachMediaSource(mediaSource, videoModel);
-        log('MediaSource attached to element.  Waiting on open...');
+            if (!oldStream) {
+                eventBus.trigger(Events.SOURCE_INITIALIZED);
+            }
+        }
     }
 
     function activateStream(seekTime) {
 
-        activeStream.activate(mediaSource);
+        buffers = activeStream.activate(mediaSource, buffers);
 
         audioTrackDetected = checkTrackPresence(Constants.AUDIO);
         videoTrackDetected = checkTrackPresence(Constants.VIDEO);

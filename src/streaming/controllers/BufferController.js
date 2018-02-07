@@ -520,7 +520,7 @@ function BufferController(config) {
         wallclockTicked = 0;
     }
 
-    function reset(errored) {
+    function reset(errored, removeBuffers) {
         eventBus.off(Events.DATA_UPDATE_COMPLETED, onDataUpdateCompleted, this);
         eventBus.off(Events.QUALITY_CHANGE_REQUESTED, onQualityChanged, this);
         eventBus.off(Events.INIT_FRAGMENT_LOADED, onInitFragmentLoaded, this);
@@ -543,10 +543,11 @@ function BufferController(config) {
 
         if (!errored) {
             sourceBufferController.abort(mediaSource, buffer);
-            sourceBufferController.removeSourceBuffer(mediaSource, buffer);
+            if (removeBuffers) {
+                sourceBufferController.removeSourceBuffer(mediaSource, buffer);
+                buffer = null;
+            }
         }
-
-        buffer = null;
     }
 
     instance = {

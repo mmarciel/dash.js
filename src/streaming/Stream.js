@@ -102,25 +102,28 @@ function Stream(config) {
      * Activates Stream by re-initializing some of its components
      * @param {MediaSource} mediaSource
      * @memberof Stream#
+     * @param {SourceBuffer} previousBuffers
      */
-    function activate(mediaSource) {
+    function activate(mediaSource, previousBuffers) {
         if (!isStreamActivated) {
             eventBus.on(Events.CURRENT_TRACK_CHANGED, onCurrentTrackChanged, instance);
-            initializeMedia(mediaSource);
             isStreamActivated = true;
+            return initializeMedia(mediaSource, previousBuffers);
         }
     }
 
     /**
      * Partially resets some of the Stream elements
      * @memberof Stream#
+     * @param {boolean} removeBuffers
      */
-    function deactivate() {
+    function deactivate(removeBuffers) {
         let ln = streamProcessors ? streamProcessors.length : 0;
+        const errored = false;
         for (let i = 0; i < ln; i++) {
             let fragmentModel = streamProcessors[i].getFragmentModel();
             fragmentModel.removeExecutedRequestsBeforeTime(getStartTime() + getDuration());
-            streamProcessors[i].reset();
+            streamProcessors[i].reset(errored, removeBuffers);
         }
         streamProcessors = [];
         isStreamActivated = false;
@@ -316,9 +319,17 @@ function Stream(config) {
         abrController.updateTopQualityIndex(mediaInfo);
 
         if (optionalSettings) {
-            streamProcessor.setBuffer(optionalSettings.buffer);
-            streamProcessor.getIndexHandler().setCurrentTime(optionalSettings.currentTime);
-            streamProcessors[optionalSettings.replaceIdx] = streamProcessor;
+            if (optionalSettings.buffer) {
+                streamProcessor.setBuffer(optionalSettings.buffer);
+            }
+            if (optionalSettings.currentTime) {
+                streamProcessor.getIndexHandler().setCurrentTime(optionalSettings.currentTime);
+            }
+            if (optionalSettings.replaceIdx) {
+                streamProcessors[optionalSettings.replaceIdx] = streamProcessor;
+            } else {
+                streamProcessors.push(streamProcessor);
+            }
         } else {
             streamProcessors.push(streamProcessor);
         }
@@ -343,7 +354,7 @@ function Stream(config) {
         }
     }
 
-    function initializeMediaForType(type, mediaSource) {
+    function initializeMediaForType(type, mediaSource, optionalSettings) {
         const allMediaForType = adapter.getAllMediaInfoForType(streamInfo, type);
 
         let mediaInfo = null;
@@ -389,10 +400,10 @@ function Stream(config) {
         // TODO : How to tell index handler live/duration?
         // TODO : Pass to controller and then pass to each method on handler?
 
-        createStreamProcessor(initialMediaInfo, allMediaForType, mediaSource);
+        createStreamProcessor(initialMediaInfo, allMediaForType, mediaSource, optionalSettings);
     }
 
-    function initializeMedia(mediaSource) {
+    function initializeMedia(mediaSource, previousBuffers) {
         checkConfig();
         let events;
 
@@ -414,15 +425,15 @@ function Stream(config) {
         filterCodecs(Constants.VIDEO);
         filterCodecs(Constants.AUDIO);
 
-        initializeMediaForType(Constants.VIDEO, mediaSource);
-        initializeMediaForType(Constants.AUDIO, mediaSource);
+        initializeMediaForType(Constants.VIDEO, mediaSource, previousBuffers && previousBuffers[Constants.VIDEO] ? { buffer: previousBuffers[Constants.VIDEO] } : undefined);
+        initializeMediaForType(Constants.AUDIO, mediaSource, previousBuffers && previousBuffers[Constants.AUDIO] ? { buffer: previousBuffers[Constants.AUDIO] } : undefined);
         initializeMediaForType(Constants.TEXT, mediaSource);
         initializeMediaForType(Constants.FRAGMENTED_TEXT, mediaSource);
         initializeMediaForType(Constants.EMBEDDED_TEXT, mediaSource);
         initializeMediaForType(Constants.MUXED, mediaSource);
         initializeMediaForType(Constants.IMAGE, mediaSource);
 
-        createBuffers();
+        const buffers = createBuffers();
 
         //TODO. Consider initialization of TextSourceBuffer here if embeddedText, but no sideloadedText.
 
@@ -437,6 +448,7 @@ function Stream(config) {
             //log("Playback initialized!");
             checkIfInitializationCompleted();
         }
+        return buffers;
     }
 
     function filterCodecs(type) {
@@ -497,9 +509,11 @@ function Stream(config) {
     }
 
     function createBuffers() {
+        const buffers = {};
         for (let i = 0, ln = streamProcessors.length; i < ln; i++) {
-            streamProcessors[i].createBuffer();
+            buffers[streamProcessors[i].getType()] = streamProcessors[i].createBuffer();
         }
+        return buffers;
     }
 
     function onBufferingCompleted(e) {
