@@ -69,6 +69,8 @@ const MANIFEST_RETRY_INTERVAL = 500;
 const XLINK_RETRY_ATTEMPTS = 1;
 const XLINK_RETRY_INTERVAL = 500;
 
+const DEFAULT_LOW_LATENCY_LIVE_DELAY = 3;
+
 //This value influences the startup time for live (in ms).
 const WALLCLOCK_TIME_UPDATE_INTERVAL = 50;
 
@@ -104,7 +106,9 @@ function MediaPlayerModel() {
         fastSwitchEnabled,
         customABRRule,
         movingAverageMethod,
-        cacheLoadThresholds;
+        cacheLoadThresholds,
+        lowLatencyMode,
+        browserCapableLowLatencyMode;
 
     function setup() {
         UTCTimingSources = [];
@@ -140,6 +144,8 @@ function MediaPlayerModel() {
         };
         customABRRule = [];
         movingAverageMethod = Constants.MOVING_AVERAGE_SLIDING_WINDOW;
+        lowLatencyMode = false;
+        browserCapableLowLatencyMode = undefined;
 
         retryAttempts = {
             [HTTPRequest.MPD_TYPE]:                         MANIFEST_RETRY_ATTEMPTS,
@@ -414,6 +420,9 @@ function MediaPlayerModel() {
     }
 
     function getLiveDelay() {
+        if (lowLatencyMode) {
+            return liveDelay || DEFAULT_LOW_LATENCY_LIVE_DELAY;
+        }
         return liveDelay;
     }
 
@@ -476,6 +485,14 @@ function MediaPlayerModel() {
 
     function getMovingAverageMethod() {
         return movingAverageMethod;
+    }
+
+    function getLowLatencyMode() {
+        return lowLatencyMode;
+    }
+
+    function setLowLatencyMode(value) {
+        lowLatencyMode = value;
     }
 
     function reset() {
@@ -550,6 +567,8 @@ function MediaPlayerModel() {
         getFastSwitchEnabled: getFastSwitchEnabled,
         setMovingAverageMethod: setMovingAverageMethod,
         getMovingAverageMethod: getMovingAverageMethod,
+        getLowLatencyMode: getLowLatencyMode,
+        setLowLatencyMode: setLowLatencyMode,
         reset: reset
     };
 
